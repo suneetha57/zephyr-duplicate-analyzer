@@ -1,41 +1,45 @@
-import xml.etree.ElementTree as ET
 import pandas as pd
+import xml.etree.ElementTree as ET
+from openpyxl import Workbook
 from rapidfuzz import fuzz
 import os
-from datetime import datetime
+import uuid
 
-def analyze_test_cases(xml_path):
+def parse_zephyr_xml(xml_path):
     tree = ET.parse(xml_path)
     root = tree.getroot()
+    tests = []
 
-    data = []
     for test_case in root.findall(".//testcase"):
-        user_story = test_case.findtext("customfield[@id='User Story']/value", default="N/A")
-        steps = test_case.findtext("steps", default="").strip()
+        user_story = test_case.findtext("userstory", default="").strip()
+        steps = " ".join([
+            step.text.strip() for step in test_case.findall(".//step")
+            if step.text and step.text.strip()
+        ])
+        tests.append({"User Story": user_story, "Steps": steps})
+    
+    return pd.DataFrame(tests)
 
-        if not steps:
-            # Try fallback: Zephyr sometimes stores steps in <step> elements
-            step_elements = test_case.findall(".//step/step")
-            steps = "\n".join([s.text or "" for s in step_elements])
-
-        data.append({"Steps": steps, "User Story": user_story})
-
-    df = pd.DataFrame(data)
-    df.dropna(subset=["Steps", "User Story"], inplace=True)
-
-    # Find duplicates
+def find_duplicates(df):
     df["Duplicate Of"] = ""
-    df["Keep/Newer"] = ""
-
     for i in range(len(df)):
         for j in range(i + 1, len(df)):
-            if df.loc[i, "User Story"] != df.loc[j, "User Story"]:
-                similarity = fuzz.token_sort_ratio(df.loc[i, "Steps"], df.loc[j, "Steps"])
-                if similarity > 90:
-                    df.at[j, "Duplicate Of"] = df.loc[i, "User Story"]
-                    df.at[i, "Keep/Newer"] = "Keep"
-                    df.at[j, "Keep/Newer"] = "Deprecate"
+            similarity = fuzz.ratio(df.at[i, "Steps"], df.at[j, "Steps"])
+            if similarity >= 85 and df.at[i, "User Story"] != df.at[j, "User Story"]:
+                df.at[j, "Duplicate Of"] = f"Row {i+2} (User Story: {df.at[i, 'User Story']})"
+    return df
 
-    output_path = f"report_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
-    df.to_excel(output_path, index=False)
-    return output_path
+def analyze_test_cases(xml_path):
+    df = parse_zephyr_xml(xml_path)
+
+    required_cols = ["Steps", "User Story"]
+    for col in required_cols:
+        if col not in df.columns:
+            raise KeyError(f"Missing required column: {col}")
+
+    df.dropna(subset=["Steps", "User Story"], inplace=True)
+    df = find_duplicates(df)
+
+    report_path = os.path.join("uploads", f"deduplicated_{uuid.uuid4().hex}.xlsx")
+    df.to_excel(report_path, index=False)
+    return report_path
