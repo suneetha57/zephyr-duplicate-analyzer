@@ -1,7 +1,13 @@
-<!doctype html>
-<title>Zephyr Duplicate Analyzer</title>
-<h2>Upload Zephyr XML File</h2>
-<form method=post enctype=multipart/form-data>
-  <input type=file name=file>
-  <input type=submit value=Upload>
-</form>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Zephyr Duplicate Analyzer</title>
+</head>
+<body>
+    <h1>Upload Zephyr XML</h1>
+    <form method="post" enctype="multipart/form-data">
+        <input type="file" name="file" accept=".xml" required>
+        <button type="submit">Analyze</button>
+    </form>
+</body>
+</html>
