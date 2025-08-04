@@ -23,7 +23,12 @@ def analyze_test_cases(xml_path):
         })
 
     df = pd.DataFrame(test_cases)
-    df.dropna(subset=["Steps", "User Story"], inplace=True)
+    required_columns = ["Steps", "User Story"]
+    for col in required_columns:
+    if col not in df.columns:
+        df[col] = ""
+
+    df.dropna(subset=required_columns, inplace=True)
 
     duplicates = []
     for i in range(len(df)):
