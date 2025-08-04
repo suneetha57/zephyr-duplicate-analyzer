@@ -1,6 +1,5 @@
-import pandas as pd
 import xml.etree.ElementTree as ET
-from openpyxl import Workbook
+import pandas as pd
 from rapidfuzz import fuzz
 import os
 from datetime import datetime
@@ -9,60 +8,34 @@ def analyze_test_cases(xml_path):
     tree = ET.parse(xml_path)
     root = tree.getroot()
 
-    test_cases = []
+    data = []
+    for test_case in root.findall(".//testcase"):
+        user_story = test_case.findtext("customfield[@id='User Story']/value", default="N/A")
+        steps = test_case.findtext("steps", default="").strip()
 
-    for testcase in root.iter("testcase"):
-        key = testcase.findtext("key")
-        summary = testcase.findtext("summary")
-        user_story = testcase.findtext("customfield_10049") or ""
-        updated = testcase.findtext("updated")
-        updated_date = datetime.strptime(updated.split("T")[0], "%Y-%m-%d") if updated else None
+        if not steps:
+            # Try fallback: Zephyr sometimes stores steps in <step> elements
+            step_elements = test_case.findall(".//step/step")
+            steps = "\n".join([s.text or "" for s in step_elements])
 
-        steps = []
-        for step in testcase.findall(".//step"):
-            action = step.findtext("action") or ""
-            steps.append(action.strip())
+        data.append({"Steps": steps, "User Story": user_story})
 
-        step_text = " | ".join(steps)
-        test_cases.append({
-            "Test Case Key": key,
-            "Summary": summary,
-            "User Story": user_story,
-            "Steps": step_text,
-            "Updated": updated_date,
-        })
+    df = pd.DataFrame(data)
+    df.dropna(subset=["Steps", "User Story"], inplace=True)
 
-    df = pd.DataFrame(test_cases)
-
-    # ✅ Defensive column handling
-    required_columns = ["Steps", "User Story"]
-    for col in required_columns:
-        if col not in df.columns:
-            df[col] = ""
-
-    df.dropna(subset=required_columns, inplace=True)
-
+    # Find duplicates
     df["Duplicate Of"] = ""
     df["Keep/Newer"] = ""
 
     for i in range(len(df)):
         for j in range(i + 1, len(df)):
-            # Skip if same user story
-            if df.iloc[i]["User Story"] == df.iloc[j]["User Story"]:
-                continue
+            if df.loc[i, "User Story"] != df.loc[j, "User Story"]:
+                similarity = fuzz.token_sort_ratio(df.loc[i, "Steps"], df.loc[j, "Steps"])
+                if similarity > 90:
+                    df.at[j, "Duplicate Of"] = df.loc[i, "User Story"]
+                    df.at[i, "Keep/Newer"] = "Keep"
+                    df.at[j, "Keep/Newer"] = "Deprecate"
 
-            similarity = fuzz.token_sort_ratio(df.iloc[i]["Steps"], df.iloc[j]["Steps"])
-
-            if similarity > 85:  # threshold
-                if df.iloc[i]["Updated"] and df.iloc[j]["Updated"]:
-                    if df.iloc[i]["Updated"] > df.iloc[j]["Updated"]:
-                        df.at[j, "Duplicate Of"] = df.iloc[i]["Test Case Key"]
-                        df.at[i, "Keep/Newer"] = "Yes"
-                    else:
-                        df.at[i, "Duplicate Of"] = df.iloc[j]["Test Case Key"]
-                        df.at[j, "Keep/Newer"] = "Yes"
-
-    output_path = os.path.join("uploads", "zephyr_duplicates.xlsx")
+    output_path = f"report_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
     df.to_excel(output_path, index=False)
     return output_path
-
