@@ -19,3 +19,7 @@ def index():
             return send_file(report_path, as_attachment=True)
         return "Invalid file type. Only .xml is supported."
     return render_template("index.html")
+
+# ✅ Required to run the app on Render
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
